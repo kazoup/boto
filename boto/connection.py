@@ -817,7 +817,8 @@ class AWSAuthConnection(object):
         # Patch the instance and not the class to avoid propagating the change outside boto
         # This is probably not necessary since a response will never have the status 100 without the code
         # added in HTTPResponse.begin()
-        connection.getresponse = new.instancemethod(getresponse, connection, None)
+        if not 'Mock' in repr(connection):
+            connection.getresponse = new.instancemethod(getresponse, connection, None)
 
         return connection
 
