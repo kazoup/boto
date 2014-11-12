@@ -1089,6 +1089,18 @@ class Key(object):
                 http_conn.putheader(key, headers[key])
             http_conn.endheaders()
 
+            # What if the server does not send the 100 Continue?
+            #
+            # From the RFC (http://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html#sec8.2.3):
+            # Because of the presence of older implementations, the protocol allows ambiguous situations in which
+            # a client may send "Expect: 100- continue" without receiving either a 417 (Expectation Failed) status
+            # or a 100 (Continue) status. Therefore, when a client sends this header field to an origin server
+            # (possibly via a proxy) from which it has never seen a 100 (Continue) status, the client SHOULD NOT wait
+            # for an indefinite period before sending the request body.
+            response = http_conn.getresponse()
+            if response.status != 100:
+                return response
+
             save_debug = self.bucket.connection.debug
             self.bucket.connection.debug = 0
             # If the debuglevel < 4 we don't want to show connection

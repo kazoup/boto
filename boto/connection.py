@@ -44,6 +44,7 @@ Handles basic connections to AWS
 """
 from datetime import datetime
 import errno
+import new
 import os
 import random
 import re
@@ -389,6 +390,7 @@ class HTTPResponse(http_client.HTTPResponse):
     def __init__(self, *args, **kwargs):
         http_client.HTTPResponse.__init__(self, *args, **kwargs)
         self._cached_response = ''
+        self._cached_status = None
 
     def read(self, amt=None):
         """Read the response.
@@ -411,6 +413,36 @@ class HTTPResponse(http_client.HTTPResponse):
             return self._cached_response
         else:
             return http_client.HTTPResponse.read(self, amt)
+
+    def begin(self):
+        """
+        Handle the status of the response
+
+        httplib skips the 100-Continue responses. This code will prevent that.
+        """
+        if self.msg is not None:
+            # we've already started reading the response
+            return
+
+        version, status, reason = self._read_status()
+        if status == 100:
+            # Use a different status to prevent httplib from skipping the response
+            self._cached_status = version, 199, reason
+            http_client.HTTPResponse.begin(self)
+            self._cached_status = None
+
+            self.status = 100
+            # We are expecting a second response
+            self.will_close = 0
+        else:
+            self._cached_status = version, status, reason
+            http_client.HTTPResponse.begin(self)
+            self._cached_status = None
+
+    def _read_status(self):
+        if self._cached_status:
+            return self._cached_status
+        return http_client.HTTPResponse._read_status(self)
 
 
 class AWSAuthConnection(object):
@@ -775,6 +807,18 @@ class AWSAuthConnection(object):
         # Set the response class of the http connection to use our custom
         # class.
         connection.response_class = HTTPResponse
+
+        def getresponse(self, buffering=False):
+            response = connection.__class__.getresponse(self, buffering)
+            if response.status == 100:
+                response.fp = None
+                connection._HTTPConnection__state = 'Request-sent'
+            return response
+        # Patch the instance and not the class to avoid propagating the change outside boto
+        # This is probably not necessary since a response will never have the status 100 without the code
+        # added in HTTPResponse.begin()
+        connection.getresponse = new.instancemethod(getresponse, connection, None)
+
         return connection
 
     def put_http_connection(self, host, port, is_secure, connection):
